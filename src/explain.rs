@@ -25,7 +25,7 @@ enum CalciteToken {
     String,
 
     // Attributes (word followed by =)
-    #[regex(r"[a-zA-Z_][\w\.#\d]*=", priority = 6)]
+    #[regex(r"@?[a-zA-Z_][\w\.#\d]*=", priority = 6)]
     Attribute,
 
     // Numbers
