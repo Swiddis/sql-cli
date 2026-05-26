@@ -7,6 +7,8 @@ use std::io::{self, IsTerminal, Read};
 use std::time::Duration;
 use tabled::settings::Style;
 
+mod explain;
+
 #[derive(Parser)]
 #[command(name = "ppl")]
 #[command(about = "Run PPL queries on localhost:9200", long_about = None)]
@@ -22,6 +24,10 @@ struct Cli {
     /// Output curl command instead of executing query
     #[arg(long)]
     export: bool,
+
+    /// Use explain endpoint for query plan
+    #[arg(long)]
+    explain: bool,
 
     /// Input file (if not provided, reads from stdin)
     #[arg(value_name = "FILE")]
@@ -116,7 +122,11 @@ fn main() -> Result<()> {
         anyhow::bail!("No query provided");
     }
 
-    let url = "http://localhost:9200/_plugins/_ppl";
+    let url = if cli.explain {
+        "http://localhost:9200/_plugins/_ppl/_explain"
+    } else {
+        "http://localhost:9200/_plugins/_ppl"
+    };
     let body = QueryRequest {
         query: query.to_string(),
     };
@@ -145,6 +155,26 @@ fn main() -> Result<()> {
 
     let status = response.status();
     let response_text = response.text()?;
+
+    // Handle explain mode separately
+    if cli.explain {
+        if !status.is_success() {
+            eprintln!("Error: Request failed with status {}", status);
+        }
+
+        if let Ok(json_val) = serde_json::from_str::<Value>(&response_text) {
+            if let Some(formatted) = explain::format_calcite_explain(&json_val) {
+                println!("{}", formatted);
+            } else if io::stdout().is_terminal() {
+                println!("{}", colorize_json(&json_val));
+            } else {
+                println!("{}", serde_json::to_string_pretty(&json_val)?);
+            }
+        } else {
+            println!("{}", response_text);
+        }
+        return Ok(());
+    }
 
     if !status.is_success() {
         eprintln!("Error: Request failed with status {}", status);
