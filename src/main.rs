@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::{self, IsTerminal, Read};
 use std::time::Duration;
+use tabled::settings::Style;
 
 #[derive(Parser)]
 #[command(name = "ppl")]
@@ -58,38 +59,37 @@ fn format_jdbc_to_json(response: &PplResponse) -> Vec<Value> {
 }
 
 fn format_table(response: &PplResponse) -> String {
-    let mut output = String::new();
-
-    // Header
-    let headers: Vec<&str> = response.schema.iter().map(|c| c.name.as_str()).collect();
-    output.push_str(&headers.join("\t"));
-    output.push('\n');
-
-    // Separator
-    output.push_str(
-        &headers
-            .iter()
-            .map(|h| "-".repeat(h.len()))
-            .collect::<Vec<_>>()
-            .join("\t"),
-    );
-    output.push('\n');
-
-    // Rows
-    for row in &response.datarows {
-        let row_str: Vec<String> = row
-            .iter()
-            .map(|v| match v {
-                Value::String(s) => s.clone(),
-                Value::Null => "null".to_string(),
-                other => other.to_string(),
-            })
-            .collect();
-        output.push_str(&row_str.join("\t"));
-        output.push('\n');
+    if response.datarows.is_empty() {
+        return String::new();
     }
 
-    output
+    // Convert each row to a Vec<String> for display
+    let rows: Vec<Vec<String>> = response
+        .datarows
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|v| match v {
+                    Value::String(s) => s.clone(),
+                    Value::Null => "null".to_string(),
+                    other => other.to_string(),
+                })
+                .collect()
+        })
+        .collect();
+
+    // Build table using tabled
+    let mut builder = tabled::builder::Builder::default();
+
+    // Add header
+    builder.push_record(response.schema.iter().map(|c| &c.name));
+
+    // Add rows
+    for row in rows {
+        builder.push_record(row);
+    }
+
+    builder.build().with(Style::modern()).to_string()
 }
 
 fn colorize_json(json_val: &Value) -> String {
