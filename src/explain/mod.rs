@@ -1,53 +1,7 @@
-use colored::Colorize;
-use logos::Logos;
 use serde_json::Value;
 
-#[derive(Logos, Debug, PartialEq)]
-enum CalciteToken {
-    // Line starting with = (comment/header)
-    #[regex(r"=.*?", priority = 10)]
-    Comment,
-
-    // Null, true, false keywords
-    #[regex(r"null|true|false", priority = 8)]
-    Keyword,
-
-    // Function names (capitalized words)
-    #[regex(r"[A-Z][a-z]\w+", priority = 7)]
-    Function,
-
-    // Variables like $0, $1, $foo
-    #[regex(r"\$[\d\w]+", priority = 7)]
-    Variable,
-
-    // Strings in quotes
-    #[regex(r#""[^"]*""#, priority = 7)]
-    String,
-
-    // Attributes (word followed by =)
-    #[regex(r"@?[a-zA-Z_][\w\.#\d]*=", priority = 6)]
-    Attribute,
-
-    // Numbers
-    #[regex(r"\d+", priority = 5)]
-    Number,
-
-    // Words with hyphens
-    #[regex(r"[\w\-]+", priority = 3)]
-    Text,
-
-    // Whitespace (spaces and tabs) - preserve for indentation
-    #[regex(r"[ \t]+", priority = 2)]
-    Whitespace,
-
-    // Single non-word characters
-    #[regex(r"[^\w\s]", priority = 2)]
-    Punctuation,
-
-    // Newlines
-    #[regex(r"\n", priority = 1)]
-    Newline,
-}
+mod parser;
+use parser::CalciteHighlighter;
 
 pub fn format_calcite_explain(error_json: &Value) -> Option<String> {
     let calcite = error_json.get("calcite")?;
@@ -139,50 +93,8 @@ fn process_physical_calcite_line(line: &str) -> String {
 }
 
 fn highlight_calcite_plan(text: &str) -> String {
-    let mut result = String::new();
-    let mut lexer = CalciteToken::lexer(text);
-
-    while let Some(token_result) = lexer.next() {
-        let span = lexer.slice();
-
-        match token_result {
-            Ok(CalciteToken::Comment) => {
-                result.push_str(&span.bright_black().to_string());
-            }
-            Ok(CalciteToken::Function) => {
-                result.push_str(&span.cyan().to_string());
-            }
-            Ok(CalciteToken::Variable) => {
-                result.push_str(&span.yellow().to_string());
-            }
-            Ok(CalciteToken::String) => {
-                result.push_str(&span.green().to_string());
-            }
-            Ok(CalciteToken::Number) => {
-                result.push_str(&span.blue().to_string());
-            }
-            Ok(CalciteToken::Attribute) => {
-                result.push_str(&span.magenta().to_string());
-            }
-            Ok(CalciteToken::Keyword) => {
-                result.push_str(&span.bright_blue().to_string());
-            }
-            Ok(CalciteToken::Whitespace) => {
-                result.push_str(span);
-            }
-            Ok(CalciteToken::Newline) => {
-                result.push('\n');
-            }
-            Ok(CalciteToken::Text) | Ok(CalciteToken::Punctuation) => {
-                result.push_str(span);
-            }
-            Err(_) => {
-                result.push_str(span);
-            }
-        }
-    }
-
-    result
+    let mut highlighter = CalciteHighlighter::new(text);
+    highlighter.highlight()
 }
 
 #[cfg(test)]
@@ -202,5 +114,62 @@ mod tests {
         let line = "ProjectExec(fields=[a, b, c])";
         let processed = process_physical_calcite_line(line);
         assert_eq!(processed, line);
+    }
+
+    #[test]
+    fn test_complex_real_world_case() {
+        // Test with actual complex patterns from integration tests
+        let sample = r#"= Calcite Plan =
+== Logical ==
+LogicalSystemLimit(fetch=[10000], type=[QUERY_SIZE_LIMIT])
+  LogicalProject(avg_age=[$1], age_range=[$0])
+    LogicalAggregate(group=[{0}], avg_age=[AVG($1)])
+      LogicalProject(age_range=[CASE(<($10, 30), 'u30':VARCHAR, SEARCH($10, Sarg[[30..40]]), 'u40':VARCHAR, 'u100':VARCHAR)], age=[$10])
+        CalciteLogicalIndexScan(table=[[OpenSearch, test_bank]])
+"#;
+
+        let highlighted = highlight_calcite_plan(sample);
+
+        // Verify key patterns are present
+        assert!(highlighted.contains("LogicalSystemLimit"));
+        assert!(highlighted.contains("CASE"));
+        assert!(highlighted.contains("$10"));
+        assert!(highlighted.contains("u30")); // String content (quotes added separately)
+        assert!(highlighted.contains("VARCHAR"));
+
+        // Should handle nested function calls
+        assert!(highlighted.contains("AVG"));
+        assert!(highlighted.contains("SEARCH"));
+    }
+
+    #[test]
+    fn test_highlighting_visual() {
+        // This test is for manual verification - run it to see colored output
+        let sample = r#"= Calcite Plan =
+== Logical ==
+LogicalSystemLimit(fetch=[10000], type=[QUERY_SIZE_LIMIT])
+  LogicalProject(count()=[$1], c1=[$1], gender=[$0], label='hello')
+    LogicalAggregate(group=[{0}], count()=[COUNT()])
+      LogicalProject(gender=[$4], name="world")
+        CalciteLogicalIndexScan(table=[[OpenSearch, test_index]])
+
+== Physical ==
+EnumerableCalc(expr#0..1=[{inputs}], count()=[$t1], c1=[$t1], gender=[$t0])
+  CalciteEnumerableIndexScan(table=[[OpenSearch, test_index]],
+    PushDownContext=[[AGGREGATION->rel#:LogicalAggregate.NONE.[](input=RelSubset#,group={0},count()=COUNT()),
+    LIMIT->10000],
+    OpenSearchRequestBuilder(sourceBuilder={"from":0,"size":0}, requestedTotalSize=10000, pageSize=null, startFrom=0)])
+"#;
+
+        let highlighted = highlight_calcite_plan(sample);
+
+        // Print to stdout for visual inspection
+        println!("\n\n===== HIGHLIGHTED OUTPUT =====");
+        println!("{}", highlighted);
+        println!("===== END =====\n\n");
+
+        // Basic sanity checks - just verify it doesn't crash and produces output
+        assert!(!highlighted.is_empty());
+        assert!(highlighted.contains("LogicalSystemLimit"));
     }
 }
