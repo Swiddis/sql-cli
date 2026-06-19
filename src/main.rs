@@ -36,6 +36,14 @@ struct Cli {
     #[arg(long)]
     limit: Option<usize>,
 
+    /// Endpoint base URL (default: http://localhost:9200)
+    #[arg(short, long)]
+    endpoint: Option<String>,
+
+    /// HTTP basic auth (format: username:password)
+    #[arg(short, long)]
+    auth: Option<String>,
+
     /// Input files or glob pattern (if not provided, reads from stdin)
     #[arg(value_name = "FILE")]
     files: Vec<String>,
@@ -116,10 +124,11 @@ fn run_query(query: &str, cli: &Cli) -> Result<()> {
         anyhow::bail!("No query provided");
     }
 
+    let base = cli.endpoint.as_deref().unwrap_or("http://localhost:9200");
     let url = if cli.explain {
-        "http://localhost:9200/_plugins/_ppl/_explain"
+        format!("{}/_plugins/_ppl/_explain", base)
     } else {
-        "http://localhost:9200/_plugins/_ppl"
+        format!("{}/_plugins/_ppl", base)
     };
     let body = QueryRequest {
         query: query.to_string(),
@@ -129,10 +138,14 @@ fn run_query(query: &str, cli: &Cli) -> Result<()> {
     // Export mode: output curl command
     if cli.export {
         let json_body = serde_json::to_string(&body)?;
-        println!(
+        let mut cmd = format!(
             "curl -X POST '{}' -H 'Content-Type: application/json' -d '{}' --max-time 120",
             url, json_body
         );
+        if let Some(auth) = &cli.auth {
+            cmd.push_str(&format!(" -u '{}'", auth));
+        }
+        println!("{}", cmd);
         return Ok(());
     }
 
@@ -141,12 +154,19 @@ fn run_query(query: &str, cli: &Cli) -> Result<()> {
         .timeout(Duration::from_secs(120))
         .build()?;
 
-    let response = client
-        .post(url)
+    let mut req = client
+        .post(&url)
         .header("Content-Type", "application/json")
-        .json(&body)
-        .send()
-        .context("Failed to send request")?;
+        .json(&body);
+
+    if let Some(auth) = &cli.auth {
+        let parts: Vec<&str> = auth.splitn(2, ':').collect();
+        if parts.len() == 2 {
+            req = req.basic_auth(parts[0], Some(parts[1]));
+        }
+    }
+
+    let response = req.send().context("Failed to send request")?;
 
     let status = response.status();
     let response_text = response.text()?;
