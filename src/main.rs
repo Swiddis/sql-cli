@@ -29,9 +29,16 @@ struct Cli {
     #[arg(long)]
     explain: bool,
 
-    /// Input file (if not provided, reads from stdin)
+    #[arg(long)]
+    profile: bool,
+
+    /// Limit results per query (default: 10 for glob, unlimited otherwise)
+    #[arg(long)]
+    limit: Option<usize>,
+
+    /// Input files or glob pattern (if not provided, reads from stdin)
     #[arg(value_name = "FILE")]
-    file: Option<String>,
+    files: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -48,6 +55,7 @@ struct SchemaColumn {
 #[derive(Debug, Serialize)]
 struct QueryRequest {
     query: String,
+    profile: bool,
 }
 
 fn format_jdbc_to_json(response: &PplResponse) -> Vec<Value> {
@@ -102,21 +110,7 @@ fn colorize_json(json_val: &Value) -> String {
     colored_json::to_colored_json_auto(&json_val).unwrap()
 }
 
-fn main() -> Result<()> {
-    let cli = Cli::parse();
-
-    // Read query from file or stdin
-    let query = if let Some(file_path) = &cli.file {
-        std::fs::read_to_string(file_path)
-            .with_context(|| format!("Failed to read file: {}", file_path))?
-    } else {
-        let mut buffer = String::new();
-        io::stdin()
-            .read_to_string(&mut buffer)
-            .context("Failed to read from stdin")?;
-        buffer
-    };
-
+fn run_query(query: &str, cli: &Cli) -> Result<()> {
     let query = query.trim();
     if query.is_empty() {
         anyhow::bail!("No query provided");
@@ -129,6 +123,7 @@ fn main() -> Result<()> {
     };
     let body = QueryRequest {
         query: query.to_string(),
+        profile: cli.profile,
     };
 
     // Export mode: output curl command
@@ -187,7 +182,7 @@ fn main() -> Result<()> {
         } else {
             println!("{}", response_text);
         }
-        std::process::exit(1);
+        anyhow::bail!("Query failed");
     }
 
     let ppl_response: PplResponse =
@@ -197,7 +192,10 @@ fn main() -> Result<()> {
     if cli.table {
         println!("{}", format_table(&ppl_response));
     } else {
-        let results = format_jdbc_to_json(&ppl_response);
+        let mut results = format_jdbc_to_json(&ppl_response);
+        if let Some(limit) = cli.limit {
+            results.truncate(limit);
+        }
 
         if cli.compact {
             let fmt = ColoredFormatter::new(CompactFormatter {});
@@ -211,4 +209,63 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn main() -> Result<()> {
+    let mut cli = Cli::parse();
+
+    // Expand globs if needed
+    let mut resolved_files = Vec::new();
+    for pattern in &cli.files {
+        if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+            let matches: Vec<_> = glob::glob(pattern)
+                .with_context(|| format!("Invalid glob pattern: {}", pattern))?
+                .collect::<Result<Vec<_>, _>>()?;
+            resolved_files.extend(matches);
+        } else {
+            resolved_files.push(std::path::PathBuf::from(pattern));
+        }
+    }
+
+    // Batch mode: multiple files
+    if resolved_files.len() > 1 {
+        if !cli.compact && !cli.table {
+            cli.compact = true; // ponytail: auto-compact for batch
+        }
+        if cli.limit.is_none() {
+            cli.limit = Some(10); // ponytail: auto-limit for batch
+        }
+
+        for path in resolved_files {
+            println!("--- {} ---", path.display());
+            let query = match std::fs::read_to_string(&path) {
+                Ok(q) => q,
+                Err(e) => {
+                    eprintln!("Error reading file: {}", e);
+                    println!();
+                    continue;
+                }
+            };
+
+            if let Err(e) = run_query(&query, &cli) {
+                eprintln!("Error: {}", e);
+            }
+            println!();
+        }
+        return Ok(());
+    }
+
+    // Single file or stdin
+    let query = if let Some(file) = resolved_files.first() {
+        std::fs::read_to_string(file)
+            .with_context(|| format!("Failed to read file: {}", file.display()))?
+    } else {
+        let mut buffer = String::new();
+        io::stdin()
+            .read_to_string(&mut buffer)
+            .context("Failed to read from stdin")?;
+        buffer
+    };
+
+    run_query(&query, &cli)
 }
