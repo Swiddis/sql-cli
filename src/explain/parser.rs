@@ -71,11 +71,10 @@ impl<'a> Lexer<'a> {
     }
 
     fn skip_whitespace(&mut self) -> Option<&'a str> {
-        if let Some(ch) = self.peek_char() {
-            if ch == ' ' || ch == '\t' {
+        if let Some(ch) = self.peek_char()
+            && (ch == ' ' || ch == '\t') {
                 return Some(self.consume_while(|c| c == ' ' || c == '\t'));
             }
-        }
         None
     }
 
@@ -309,7 +308,7 @@ impl<'a> CalciteHighlighter<'a> {
                     if is_attr {
                         s.magenta().to_string()
                     } else if is_fn_or_op {
-                        if is_op_pos && s.chars().next().map_or(false, |c| c.is_uppercase()) {
+                        if is_op_pos && s.chars().next().is_some_and(|c| c.is_uppercase()) {
                             // Calcite operator (LogicalProject, EnumerableCalc, etc.)
                             s.bright_cyan().bold().to_string()
                         } else {
