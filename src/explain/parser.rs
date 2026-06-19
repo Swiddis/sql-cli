@@ -12,21 +12,21 @@ enum Token<'a> {
     CloseBrace,
     Comma,
     Equals,
-    Arrow,       // ->
+    Arrow, // ->
     Colon,
     Dot,
     Hash,
 
     // Content
-    Identifier(&'a str),  // Generic identifier (context determines if it's operator/function/attribute)
-    Variable(&'a str),    // $0, $t1, etc.
-    String(&'a str),      // Quoted strings (includes quotes)
-    Number(&'a str),      // Numeric literals
-    Keyword(&'a str),     // null, true, false
+    Identifier(&'a str), // Generic identifier (context determines if it's operator/function/attribute)
+    Variable(&'a str),   // $0, $t1, etc.
+    String(&'a str),     // Quoted strings (includes quotes)
+    Number(&'a str),     // Numeric literals
+    Keyword(&'a str),    // null, true, false
 
     // Special
-    Comment(&'a str),     // Lines starting with =
-    Whitespace(&'a str),  // Preserved for formatting
+    Comment(&'a str),    // Lines starting with =
+    Whitespace(&'a str), // Preserved for formatting
     Newline,
 }
 
@@ -72,9 +72,10 @@ impl<'a> Lexer<'a> {
 
     fn skip_whitespace(&mut self) -> Option<&'a str> {
         if let Some(ch) = self.peek_char()
-            && (ch == ' ' || ch == '\t') {
-                return Some(self.consume_while(|c| c == ' ' || c == '\t'));
-            }
+            && (ch == ' ' || ch == '\t')
+        {
+            return Some(self.consume_while(|c| c == ' ' || c == '\t'));
+        }
         None
     }
 
@@ -188,7 +189,9 @@ impl<'a> Lexer<'a> {
             '@' => {
                 // Attribute like @timestamp
                 // consume_while includes the @ since it's the current char
-                let attr = self.consume_while(|c| c == '@' || c.is_alphanumeric() || c == '_' || c == '.' || c == '#');
+                let attr = self.consume_while(|c| {
+                    c == '@' || c.is_alphanumeric() || c == '_' || c == '.' || c == '#'
+                });
                 if attr.is_empty() {
                     // Shouldn't happen, but if it does, consume the @ to avoid infinite loop
                     self.advance();
@@ -320,12 +323,15 @@ impl<'a> CalciteHighlighter<'a> {
                         s.to_string()
                     }
                 }
-                Token::OpenParen | Token::CloseParen |
-                Token::OpenBracket | Token::CloseBracket |
-                Token::OpenBrace | Token::CloseBrace |
-                Token::Comma | Token::Dot | Token::Hash => {
-                    token.as_str().bright_black().to_string()
-                }
+                Token::OpenParen
+                | Token::CloseParen
+                | Token::OpenBracket
+                | Token::CloseBracket
+                | Token::OpenBrace
+                | Token::CloseBrace
+                | Token::Comma
+                | Token::Dot
+                | Token::Hash => token.as_str().bright_black().to_string(),
                 Token::Equals => "=".to_string(),
                 Token::Arrow => "->".bright_black().to_string(),
                 Token::Colon => ":".to_string(),
@@ -354,9 +360,13 @@ impl<'a> Token<'a> {
             Token::Colon => ":",
             Token::Dot => ".",
             Token::Hash => "#",
-            Token::Identifier(s) | Token::Variable(s) | Token::String(s) |
-            Token::Number(s) | Token::Keyword(s) | Token::Comment(s) |
-            Token::Whitespace(s) => s,
+            Token::Identifier(s)
+            | Token::Variable(s)
+            | Token::String(s)
+            | Token::Number(s)
+            | Token::Keyword(s)
+            | Token::Comment(s)
+            | Token::Whitespace(s) => s,
             Token::Newline => "\n",
         }
     }
@@ -385,7 +395,10 @@ mod tests {
         println!("Tokens: {:?}", tokens);
         assert!(matches!(tokens[0], Token::Variable("$0")));
         // Token index 1 is comma, but there might be whitespace
-        let t1_idx = tokens.iter().position(|t| matches!(t, Token::Variable(s) if s.contains("t1"))).expect("$t1 not found");
+        let t1_idx = tokens
+            .iter()
+            .position(|t| matches!(t, Token::Variable(s) if s.contains("t1")))
+            .expect("$t1 not found");
         assert!(matches!(tokens[t1_idx], Token::Variable(_)));
     }
 
