@@ -125,6 +125,7 @@ fn run_query(query: &str, cli: &Cli) -> Result<()> {
     }
 
     let base = cli.endpoint.as_deref().unwrap_or("http://localhost:9200");
+    let base = base.strip_suffix("/").unwrap_or(base);
     let url = if cli.explain {
         format!("{}/_plugins/_ppl/_explain", base)
     } else {
