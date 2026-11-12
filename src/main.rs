@@ -53,6 +53,10 @@ struct Cli {
     #[arg(short, long)]
     auth: Option<String>,
 
+    /// Execute query from command line (shell mode for hyperfine)
+    #[arg(short = 'c')]
+    command: Option<String>,
+
     /// Input files or glob pattern (if not provided, reads from stdin)
     #[arg(value_name = "FILE")]
     files: Vec<String>,
@@ -189,7 +193,8 @@ fn render_results(response: &PplResponse, cli: &Cli) {
 fn run_query(query: &str, cli: &Cli) -> Result<()> {
     let query = query.trim();
     if query.is_empty() {
-        anyhow::bail!("No query provided");
+        // allow empty for hyperfine shell overhead measurement
+        return Ok(());
     }
 
     let base = cli.endpoint.as_deref().unwrap_or("http://localhost:9200");
@@ -370,6 +375,11 @@ fn run_query_once(url: &str, body: &QueryRequest, cli: &Cli) -> Result<PplRespon
 
 fn main() -> Result<()> {
     let mut cli = Cli::parse();
+
+    // Shell mode (-c flag)
+    if let Some(query) = &cli.command {
+        return run_query(query, &cli);
+    }
 
     // Expand globs if needed
     let mut resolved_files = Vec::new();
