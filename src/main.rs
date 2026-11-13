@@ -33,6 +33,11 @@ struct Cli {
     #[arg(long)]
     profile: bool,
 
+    /// Decode Calcite pushdown scripts offline (no request sent). Input: an `_explain` response,
+    /// DSL (e.g. a slow log `source`), pasted plan text, or bare base64 script blob(s)
+    #[arg(long)]
+    decode: bool,
+
     /// Benchmark query (implies --profile)
     #[arg(long)]
     bench: bool,
@@ -435,6 +440,11 @@ fn main() -> Result<()> {
             .context("Failed to read from stdin")?;
         buffer
     };
+
+    if cli.decode {
+        println!("{}", explain::decode_input(&query)?);
+        return Ok(());
+    }
 
     run_query(&query, &cli)
 }

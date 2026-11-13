@@ -27,6 +27,7 @@ enum Token<'a> {
     // Special
     Comment(&'a str),    // Lines starting with =
     Whitespace(&'a str), // Preserved for formatting
+    Other(&'a str),      // Any other character, passed through unstyled
     Newline,
 }
 
@@ -155,6 +156,11 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 Some(Token::Dot)
             }
+            '#' if self.peek_str(2) == "# " => {
+                // Annotation comment (decoded scripts); Calcite's own `rel#:`/`expr#0` never has a space
+                let comment = self.consume_while(|c| c != '\n');
+                Some(Token::Comment(comment))
+            }
             '#' => {
                 self.advance();
                 Some(Token::Hash)
@@ -218,9 +224,10 @@ impl<'a> Lexer<'a> {
                 }
             }
             _ => {
-                // Unknown character, skip it
+                // Anything else (operators like < > + - * /, unicode) passes through unchanged
+                let start = self.pos;
                 self.advance();
-                self.next_token()
+                Some(Token::Other(&self.input[start..self.pos]))
             }
         }
     }
@@ -335,7 +342,7 @@ impl<'a> CalciteHighlighter<'a> {
                 Token::Equals => "=".to_string(),
                 Token::Arrow => "->".bright_black().to_string(),
                 Token::Colon => ":".to_string(),
-                Token::Whitespace(s) => s.to_string(),
+                Token::Whitespace(s) | Token::Other(s) => s.to_string(),
                 Token::Newline => "\n".to_string(),
             };
             result.push_str(&colored);
@@ -366,7 +373,8 @@ impl<'a> Token<'a> {
             | Token::Number(s)
             | Token::Keyword(s)
             | Token::Comment(s)
-            | Token::Whitespace(s) => s,
+            | Token::Whitespace(s)
+            | Token::Other(s) => s,
             Token::Newline => "\n",
         }
     }
@@ -456,6 +464,22 @@ mod tests {
 
         // First token should be @timestamp identifier
         assert!(matches!(tokens[0], Token::Identifier(_)));
+    }
+
+    #[test]
+    fn test_highlight_preserves_operator_chars() {
+        colored::control::set_override(false);
+        let input =
+            "Filter(condition=[<($10, 30)], x=[+(-1, *($0, /($1, 2)))])\n$t1 = 0 < $t0  # VARCHAR?";
+        assert_eq!(CalciteHighlighter::new(input).highlight(), input);
+    }
+
+    #[test]
+    fn test_hash_space_is_comment() {
+        let tokens: Vec<_> = Lexer::new("  # reads: doc[a]\nrel#:X").collect();
+        assert!(matches!(tokens[1], Token::Comment("# reads: doc[a]")));
+        // Calcite's `rel#:` is not a comment
+        assert!(tokens.iter().any(|t| matches!(t, Token::Hash)));
     }
 
     #[test]
